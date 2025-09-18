@@ -1,4 +1,8 @@
 import 'dotenv/config';
+import { pruneCache } from './cache-manager.js';
+
+// Prune cache on startup
+pruneCache();
 
 const serverName = process.argv[2];
 
