@@ -6,14 +6,22 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "start:cloudwatch": "node src/index.js cloudwatch-logs"
+    "start:cloudwatch": "node src/index.js cloudwatch-logs",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-logs": "^3.58.0",
     "dotenv": "^16.0.3",
     "express": "^4.18.2"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@babel/core": "^7.28.4",
+    "@babel/preset-env": "^7.28.3",
+    "@swc/core": "^1.13.5",
+    "@swc/jest": "^0.2.39",
+    "babel-jest": "^30.1.2",
+    "jest": "^30.1.3"
+  },
   "author": "Viral Jetani (https://github.com/viraljetani)",
   "license": "MIT"
 }
