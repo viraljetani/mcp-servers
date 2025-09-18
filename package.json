@@ -1,0 +1,19 @@
+{
+  "name": "mcp-servers",
+  "version": "1.0.0",
+  "description": "A collection of MCP servers",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:cloudwatch": "node src/index.js cloudwatch-logs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.58.0",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {},
+  "author": "Viral Jetani (https://github.com/viraljetani)",
+  "license": "MIT"
+}
