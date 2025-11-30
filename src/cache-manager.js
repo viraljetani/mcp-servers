@@ -4,7 +4,7 @@ import readline from 'readline';
 import { FilterLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 
 const CACHE_DIR = path.resolve(process.cwd(), 'log_cache');
-const MAX_CACHE_AGE_DAYS = 60;
+const MAX_CACHE_AGE_DAYS = 10;
 
 // Helper to sanitize log group names into safe directory names
 const sanitizeLogGroupName = (logGroupName) => {
@@ -28,7 +28,17 @@ export const getLogFilePath = (logGroupName, date) => {
   return path.join(dirPath, `${dateString}.log`);
 };
 
+// Helper function to format bytes to human-readable size
+const formatBytes = (bytes) => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+};
+
 // Downloads all logs for a given group and day, then saves to cache
+// Returns an object with eventsCount and fileSizeBytes
 export const downloadAndCacheLogs = async (logGroupName, date, client) => {
   const startTime = date.getTime();
   const endTime = startTime + 24 * 60 * 60 * 1000 - 1;
@@ -58,10 +68,13 @@ export const downloadAndCacheLogs = async (logGroupName, date, client) => {
       const logData = allEvents.map(event => JSON.stringify(event)).join('\n');
       fs.writeFileSync(tempPath, logData);
       fs.renameSync(tempPath, finalPath); // Atomic operation
-      console.log(`Successfully cached ${allEvents.length} log events to ${finalPath}`);
+      const fileSizeBytes = fs.statSync(finalPath).size;
+      console.log(`Successfully cached ${allEvents.length} log events (${formatBytes(fileSizeBytes)}) to ${finalPath}`);
+      return { eventsCount: allEvents.length, fileSizeBytes };
     } else {
       fs.writeFileSync(finalPath, ''); // Create an empty file to signify we've checked
       console.log(`No new logs to cache for ${logGroupName} on ${date.toISOString().split('T')[0]}`);
+      return { eventsCount: 0, fileSizeBytes: 0 };
     }
   } catch (error) {
     console.error(`Error downloading logs for ${logGroupName}:`, error);
@@ -108,13 +121,16 @@ export const searchLocalLogs = async (logFilePaths, filterPattern, startTime, en
 // Deletes cached log files older than MAX_CACHE_AGE_DAYS
 export const pruneCache = () => {
   console.log('Pruning old log cache...');
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - MAX_CACHE_AGE_DAYS);
+  const now = new Date();
+  const cutoffDate = new Date(now);
+  cutoffDate.setUTCDate(cutoffDate.getUTCDate() - MAX_CACHE_AGE_DAYS);
+  cutoffDate.setUTCHours(0, 0, 0, 0); // Set to start of day for consistent comparison
 
   if (!fs.existsSync(CACHE_DIR)) {
     return;
   }
 
+  let prunedCount = 0;
   const logGroupDirs = fs.readdirSync(CACHE_DIR);
   for (const logGroupDir of logGroupDirs) {
     const dirPath = path.join(CACHE_DIR, logGroupDir);
@@ -125,11 +141,15 @@ export const pruneCache = () => {
         for (const logFile of logFiles) {
           const filePath = path.join(dirPath, logFile);
           const fileDateStr = path.basename(logFile, '.log'); // YYYY-MM-DD
-          const fileDate = new Date(fileDateStr);
+          
+          // Parse date string as UTC to avoid timezone issues
+          const [year, month, day] = fileDateStr.split('-').map(Number);
+          const fileDate = new Date(Date.UTC(year, month - 1, day));
 
           if (fileDate < cutoffDate) {
-            console.log(`Pruning old log file: ${filePath}`);
+            console.log(`Pruning old log file: ${filePath} (date: ${fileDateStr}, older than ${MAX_CACHE_AGE_DAYS} days)`);
             fs.unlinkSync(filePath);
+            prunedCount++;
           }
         }
       }
@@ -137,5 +157,10 @@ export const pruneCache = () => {
       console.error(`Error pruning directory ${dirPath}:`, e);
     }
   }
-  console.log('Cache pruning complete.');
+  
+  if (prunedCount === 0) {
+    console.log('No old log files to prune.');
+  } else {
+    console.log(`Cache pruning complete. Removed ${prunedCount} old log file(s).`);
+  }
 };
