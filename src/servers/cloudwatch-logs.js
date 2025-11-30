@@ -103,19 +103,13 @@ export const start = () => {
           if (force || !alreadyCached) {
             try {
               const downloadResult = await downloadAndCacheLogs(logGroupName, date, client);
-              
-              // Get file size if file exists
-              let fileSizeBytes = 0;
-              if (fs.existsSync(filePath)) {
-                fileSizeBytes = fs.statSync(filePath).size;
-              }
 
               results.push({
                 logGroupName,
                 date: dateString,
                 status: 'downloaded',
                 eventsCount: downloadResult.eventsCount,
-                fileSizeBytes: downloadResult.fileSizeBytes || fileSizeBytes,
+                fileSizeBytes: downloadResult.fileSizeBytes,
               });
             } catch (error) {
               console.error(`Error downloading logs for ${logGroupName} on ${dateString}:`, error);
