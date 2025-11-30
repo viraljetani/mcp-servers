@@ -4,6 +4,20 @@ import 'dotenv/config';
 import fs from 'fs';
 import { getLogFilePath, downloadAndCacheLogs, searchLocalLogs } from '../cache-manager.js';
 
+// Helper function to calculate date range from timestamps
+const getDateRange = (startTime, endTime) => {
+  const dates = [];
+  let currentDate = new Date(startTime);
+  currentDate.setHours(0, 0, 0, 0);
+
+  while (currentDate.getTime() <= endTime) {
+    dates.push(new Date(currentDate));
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  return dates;
+};
+
 export const start = () => {
   const app = express();
   const port = process.env.PORT_CLOUDWATCH_LOGS || 4010;
@@ -27,14 +41,7 @@ export const start = () => {
     try {
       // Determine the unique set of daily log files we need to check/download
       const requiredFiles = new Set();
-      const dates = [];
-      let currentDate = new Date(startTime);
-      currentDate.setHours(0, 0, 0, 0);
-
-      while (currentDate.getTime() <= endTime) {
-        dates.push(new Date(currentDate));
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
+      const dates = getDateRange(startTime, endTime);
 
       for (const logGroupName of logGroupNames) {
         for (const date of dates) {
@@ -60,8 +67,99 @@ export const start = () => {
 
       res.json(allEvents);
     } catch (error) {
-      console.error(error);
+      console.error('Error searching logs:', error);
       res.status(500).send('Error searching logs');
+    }
+  });
+
+  app.post('/download', async (req, res) => {
+    const { logGroupNames, startTime, endTime, force } = req.body;
+
+    if (!logGroupNames || !Array.isArray(logGroupNames) || logGroupNames.length === 0) {
+      return res.status(400).send('logGroupNames must be a non-empty array');
+    }
+    if (!startTime || !endTime) {
+      return res.status(400).send('startTime and endTime are required');
+    }
+
+    try {
+      const dates = getDateRange(startTime, endTime);
+      const results = [];
+
+      for (const logGroupName of logGroupNames) {
+        for (const date of dates) {
+          const filePath = getLogFilePath(logGroupName, date);
+          const tempFilePath = `${filePath}.tmp`;
+          const dateString = date.toISOString().split('T')[0];
+
+          // Clean up incomplete temp file from previous runs if it exists
+          if (fs.existsSync(tempFilePath)) {
+            fs.unlinkSync(tempFilePath);
+          }
+
+          // Check if file already exists
+          const alreadyCached = fs.existsSync(filePath);
+
+          if (force || !alreadyCached) {
+            try {
+              const downloadResult = await downloadAndCacheLogs(logGroupName, date, client);
+              
+              // Get file size if file exists
+              let fileSizeBytes = 0;
+              if (fs.existsSync(filePath)) {
+                fileSizeBytes = fs.statSync(filePath).size;
+              }
+
+              results.push({
+                logGroupName,
+                date: dateString,
+                status: 'downloaded',
+                eventsCount: downloadResult.eventsCount,
+                fileSizeBytes: downloadResult.fileSizeBytes || fileSizeBytes,
+              });
+            } catch (error) {
+              console.error(`Error downloading logs for ${logGroupName} on ${dateString}:`, error);
+              results.push({
+                logGroupName,
+                date: dateString,
+                status: 'error',
+                error: error.message,
+              });
+            }
+          } else {
+            // File already exists, get stats
+            const stats = fs.statSync(filePath);
+            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            const eventsCount = fileContent.trim() === '' ? 0 : fileContent.trim().split('\n').length;
+
+            results.push({
+              logGroupName,
+              date: dateString,
+              status: 'skipped',
+              eventsCount,
+              fileSizeBytes: stats.size,
+            });
+          }
+        }
+      }
+
+      // Calculate summary
+      const summary = {
+        totalDates: results.length,
+        downloaded: results.filter(r => r.status === 'downloaded').length,
+        skipped: results.filter(r => r.status === 'skipped').length,
+        empty: results.filter(r => r.eventsCount === 0).length,
+        errors: results.filter(r => r.status === 'error').length,
+      };
+
+      res.json({
+        status: summary.errors > 0 ? 'partial' : 'completed',
+        results,
+        summary,
+      });
+    } catch (error) {
+      console.error('Error downloading logs:', error);
+      res.status(500).send('Error downloading logs');
     }
   });
 
